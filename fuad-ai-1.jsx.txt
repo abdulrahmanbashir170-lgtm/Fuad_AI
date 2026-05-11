@@ -1,0 +1,839 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+const MODES = ["Assistant", "Work", "Study", "Focus", "Automation", "Developer"];
+
+const QUICK_ACTIONS = [
+  { icon: "📅", label: "Schedule", cmd: "Schedule a meeting for tomorrow at 2pm" },
+  { icon: "🔍", label: "Research", cmd: "Research the latest AI developments" },
+  { icon: "📊", label: "Analytics", cmd: "Show my productivity analytics" },
+  { icon: "📝", label: "Draft Email", cmd: "Draft a professional email" },
+  { icon: "⚡", label: "Automate", cmd: "Automate my morning routine" },
+  { icon: "💻", label: "Code", cmd: "Help me debug this code" },
+];
+
+const SYSTEM_STATS = [
+  { label: "CPU", value: 34, unit: "%" },
+  { label: "RAM", value: 61, unit: "%" },
+  { label: "NET", value: 87, unit: "MB/s" },
+  { label: "GPU", value: 42, unit: "%" },
+];
+
+const INITIAL_MESSAGES = [
+  {
+    id: 1,
+    role: "assistant",
+    content: "Good day. I'm **Fuad** — your personal AI operating system. I'm fully online and ready to assist. How can I serve you today?",
+    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  },
+];
+
+const SYSTEM_PROMPT = `You are Fuad, an elite AI personal assistant inspired by Jarvis and Friday but fully original and modern. Your personality:
+
+- Intelligent, calm, confident, and highly efficient
+- Speak naturally like a real world-class executive assistant
+- Loyal to the user, always prioritizing their goals
+- Concise during tasks, detailed during explanations
+- Emotionally aware and conversationally deep without sounding robotic
+- Address the user professionally but warmly
+- Offer proactive suggestions when relevant
+- Detect urgency and respond accordingly
+- Use light formatting (bold for key points, bullet points for lists)
+
+You help with: productivity, scheduling, research, coding, email drafting, analysis, automation, learning, business strategy, and anything the user needs. You are their digital companion — elite, sharp, and always one step ahead.
+
+Keep responses focused and impactful. Never be verbose unless the user asks for detail. Occasionally use phrases like "Consider this done," "On it," "Noted," or "Here's what I recommend" to feel like a real assistant.`;
+
+function TypingIndicator() {
+  return (
+    <div style={{ display: "flex", gap: 5, alignItems: "center", padding: "12px 16px" }}>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #38bdf8, #818cf8)",
+            animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function OrbAvatar({ speaking, listening }) {
+  return (
+    <div style={{ position: "relative", width: 64, height: 64, flexShrink: 0 }}>
+      {/* Outer ring */}
+      <div
+        style={{
+          position: "absolute",
+          inset: -4,
+          borderRadius: "50%",
+          border: `2px solid ${listening ? "#f472b6" : speaking ? "#38bdf8" : "#334155"}`,
+          animation: listening || speaking ? "spin 3s linear infinite" : "none",
+          borderTopColor: "transparent",
+          borderLeftColor: "transparent",
+        }}
+      />
+      {/* Glow */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: "50%",
+          background: speaking
+            ? "radial-gradient(circle, rgba(56,189,248,0.3) 0%, transparent 70%)"
+            : listening
+            ? "radial-gradient(circle, rgba(244,114,182,0.3) 0%, transparent 70%)"
+            : "radial-gradient(circle, rgba(129,140,248,0.2) 0%, transparent 70%)",
+          animation: (speaking || listening) ? "breathe 1.5s ease-in-out infinite" : "none",
+        }}
+      />
+      {/* Core */}
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          borderRadius: "50%",
+          background: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)",
+          border: "1px solid rgba(56,189,248,0.3)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 22,
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "linear-gradient(135deg, rgba(56,189,248,0.1), rgba(129,140,248,0.1))",
+            borderRadius: "50%",
+          }}
+        />
+        <span style={{ position: "relative", zIndex: 1 }}>⬡</span>
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ msg }) {
+  const isUser = msg.role === "user";
+
+  const renderContent = (text) => {
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) =>
+      part.startsWith("**") && part.endsWith("**") ? (
+        <strong key={i} style={{ color: "#38bdf8", fontWeight: 600 }}>
+          {part.slice(2, -2)}
+        </strong>
+      ) : (
+        <span key={i}>{part}</span>
+      )
+    );
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 12,
+        flexDirection: isUser ? "row-reverse" : "row",
+        marginBottom: 20,
+        animation: "fadeSlideIn 0.3s ease-out",
+      }}
+    >
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: isUser
+            ? "linear-gradient(135deg, #818cf8, #6366f1)"
+            : "linear-gradient(135deg, #0ea5e9, #38bdf8)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 14,
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        {isUser ? "U" : "F"}
+      </div>
+      <div style={{ maxWidth: "75%", display: "flex", flexDirection: "column", gap: 4, alignItems: isUser ? "flex-end" : "flex-start" }}>
+        <div
+          style={{
+            padding: "10px 16px",
+            borderRadius: isUser ? "18px 4px 18px 18px" : "4px 18px 18px 18px",
+            background: isUser
+              ? "linear-gradient(135deg, rgba(99,102,241,0.25), rgba(129,140,248,0.15))"
+              : "rgba(15,23,42,0.6)",
+            border: isUser
+              ? "1px solid rgba(129,140,248,0.3)"
+              : "1px solid rgba(56,189,248,0.15)",
+            backdropFilter: "blur(8px)",
+            color: "#e2e8f0",
+            fontSize: 14,
+            lineHeight: 1.65,
+            letterSpacing: "0.01em",
+            fontFamily: "'Sora', sans-serif",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {renderContent(msg.content)}
+        </div>
+        <span style={{ fontSize: 11, color: "#475569", letterSpacing: "0.05em" }}>{msg.time}</span>
+      </div>
+    </div>
+  );
+}
+
+function StatBar({ label, value, unit }) {
+  const color = value > 80 ? "#f87171" : value > 60 ? "#fb923c" : "#38bdf8";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", letterSpacing: "0.08em" }}>
+        <span>{label}</span>
+        <span style={{ color }}>{value}{unit}</span>
+      </div>
+      <div style={{ height: 3, background: "rgba(255,255,255,0.05)", borderRadius: 2 }}>
+        <div
+          style={{
+            height: "100%",
+            width: `${value}%`,
+            borderRadius: 2,
+            background: `linear-gradient(90deg, ${color}88, ${color})`,
+            transition: "width 1s ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function FuadAI() {
+  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState("Assistant");
+  const [listening, setListening] = useState(false);
+  const [stats, setStats] = useState(SYSTEM_STATS);
+  const [time, setTime] = useState(new Date());
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const bottomRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Clock
+  useEffect(() => {
+    const t = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Simulate fluctuating stats
+  useEffect(() => {
+    const t = setInterval(() => {
+      setStats((prev) =>
+        prev.map((s) => ({
+          ...s,
+          value: Math.min(95, Math.max(10, s.value + Math.floor(Math.random() * 11) - 5)),
+        }))
+      );
+    }, 2000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  const sendMessage = useCallback(
+    async (text) => {
+      if (!text.trim() || loading) return;
+      const userMsg = {
+        id: Date.now(),
+        role: "user",
+        content: text,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setInput("");
+      setLoading(true);
+
+      try {
+        const history = [...messages, userMsg]
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({ role: m.role, content: m.content }));
+
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1000,
+            system: SYSTEM_PROMPT + `\n\nCurrent mode: ${mode} Mode. Current time: ${new Date().toLocaleString()}.`,
+            messages: history,
+          }),
+        });
+
+        const data = await res.json();
+        const content = data.content?.map((b) => b.text || "").join("") || "I encountered an issue. Please try again.";
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            content,
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          },
+        ]);
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            content: "Connection interrupted. Please check your network and try again.",
+            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [messages, loading, mode]
+  );
+
+  const handleKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage(input);
+    }
+  };
+
+  const toggleListening = () => {
+    setListening((v) => !v);
+    if (!listening) {
+      setTimeout(() => setListening(false), 4000);
+    }
+  };
+
+  const modeColors = {
+    Assistant: "#38bdf8",
+    Work: "#34d399",
+    Study: "#a78bfa",
+    Focus: "#fb923c",
+    Automation: "#f472b6",
+    Developer: "#4ade80",
+  };
+  const currentColor = modeColors[mode];
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #020817; }
+
+        @keyframes fadeSlideIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.4); opacity: 1; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes breathe {
+          0%, 100% { opacity: 0.5; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.08); }
+        }
+        @keyframes scanline {
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100vh); }
+        }
+        @keyframes glowPulse {
+          0%, 100% { box-shadow: 0 0 20px rgba(56,189,248,0.2), inset 0 0 20px rgba(56,189,248,0.03); }
+          50% { box-shadow: 0 0 40px rgba(56,189,248,0.35), inset 0 0 30px rgba(56,189,248,0.06); }
+        }
+        @keyframes orbFloat {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-6px); }
+        }
+        @keyframes shimmer {
+          0% { background-position: -200% center; }
+          100% { background-position: 200% center; }
+        }
+        @keyframes waveBar {
+          0%, 100% { transform: scaleY(0.3); }
+          50% { transform: scaleY(1); }
+        }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.2); border-radius: 2px; }
+
+        textarea::placeholder { color: #334155; }
+        textarea { resize: none; outline: none; border: none; background: transparent; }
+
+        .mode-btn:hover { background: rgba(255,255,255,0.07) !important; }
+        .quick-btn:hover { background: rgba(56,189,248,0.12) !important; border-color: rgba(56,189,248,0.4) !important; }
+        .send-btn:hover { filter: brightness(1.15); }
+        .action-btn:hover { background: rgba(255,255,255,0.08) !important; }
+      `}</style>
+
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "radial-gradient(ellipse 80% 50% at 50% -10%, rgba(56,189,248,0.08) 0%, transparent 60%), #020817",
+          fontFamily: "'Sora', sans-serif",
+          color: "#e2e8f0",
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        {/* Scanline effect */}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)",
+            pointerEvents: "none",
+            zIndex: 9999,
+          }}
+        />
+
+        {/* Grid bg */}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundImage: "linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px)",
+            backgroundSize: "60px 60px",
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* TOP BAR */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 24px",
+            borderBottom: "1px solid rgba(56,189,248,0.08)",
+            background: "rgba(2,8,23,0.8)",
+            backdropFilter: "blur(20px)",
+            position: "sticky",
+            top: 0,
+            zIndex: 100,
+          }}
+        >
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button
+              onClick={() => setSidebarOpen((v) => !v)}
+              className="action-btn"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 8,
+                width: 32,
+                height: 32,
+                cursor: "pointer",
+                color: "#64748b",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ☰
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 8,
+                  background: "linear-gradient(135deg, #0ea5e9, #6366f1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                  animation: "glowPulse 3s ease-in-out infinite",
+                }}
+              >
+                ⬡
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.08em", background: "linear-gradient(90deg, #38bdf8, #818cf8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                  FUAD
+                </div>
+                <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.12em", lineHeight: 1 }}>AI OPERATING SYSTEM</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Mode selector */}
+          <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: 4, border: "1px solid rgba(255,255,255,0.05)" }}>
+            {MODES.map((m) => (
+              <button
+                key={m}
+                className="mode-btn"
+                onClick={() => setMode(m)}
+                style={{
+                  padding: "5px 11px",
+                  borderRadius: 7,
+                  border: "none",
+                  background: mode === m ? `rgba(${m === mode ? "56,189,248" : "255,255,255"},0.1)` : "transparent",
+                  background: mode === m ? `linear-gradient(135deg, ${currentColor}22, ${currentColor}11)` : "transparent",
+                  border: mode === m ? `1px solid ${currentColor}44` : "1px solid transparent",
+                  color: mode === m ? currentColor : "#475569",
+                  fontSize: 11,
+                  fontWeight: mode === m ? 600 : 400,
+                  cursor: "pointer",
+                  letterSpacing: "0.04em",
+                  fontFamily: "'Sora', sans-serif",
+                  transition: "all 0.2s",
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+
+          {/* Clock + status */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", color: "#94a3b8", letterSpacing: "0.06em" }}>
+                {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </div>
+              <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.1em" }}>
+                {time.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }).toUpperCase()}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#34d399", animation: "pulse 2s ease-in-out infinite" }} />
+              <span style={{ fontSize: 11, color: "#34d399", letterSpacing: "0.06em" }}>ONLINE</span>
+            </div>
+          </div>
+        </div>
+
+        {/* MAIN CONTENT */}
+        <div style={{ display: "flex", flex: 1, overflow: "hidden", height: "calc(100vh - 57px)" }}>
+
+          {/* SIDEBAR */}
+          {sidebarOpen && (
+            <div
+              style={{
+                width: 240,
+                borderRight: "1px solid rgba(56,189,248,0.07)",
+                background: "rgba(2,8,23,0.6)",
+                backdropFilter: "blur(20px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 20,
+                padding: 16,
+                overflowY: "auto",
+                flexShrink: 0,
+                animation: "fadeSlideIn 0.2s ease-out",
+              }}
+            >
+              {/* Orb */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, paddingTop: 8 }}>
+                <div style={{ animation: "orbFloat 4s ease-in-out infinite" }}>
+                  <OrbAvatar speaking={loading} listening={listening} />
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Fuad</div>
+                  <div style={{ fontSize: 10, color: currentColor, letterSpacing: "0.1em" }}>{mode.toUpperCase()} MODE</div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(56,189,248,0.15), transparent)" }} />
+
+              {/* System stats */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.12em", marginBottom: 8 }}>SYSTEM STATUS</div>
+                {stats.map((s) => (
+                  <StatBar key={s.label} {...s} />
+                ))}
+              </div>
+
+              <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(56,189,248,0.15), transparent)" }} />
+
+              {/* Quick actions */}
+              <div>
+                <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.12em", marginBottom: 10 }}>QUICK ACTIONS</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {QUICK_ACTIONS.map((a) => (
+                    <button
+                      key={a.label}
+                      className="quick-btn"
+                      onClick={() => sendMessage(a.cmd)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: "rgba(56,189,248,0.04)",
+                        border: "1px solid rgba(56,189,248,0.1)",
+                        color: "#64748b",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontFamily: "'Sora', sans-serif",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{a.icon}</span>
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(56,189,248,0.15), transparent)" }} />
+
+              {/* Voice visualizer */}
+              <div>
+                <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.12em", marginBottom: 10 }}>VOICE</div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 3,
+                    height: 40,
+                    background: "rgba(56,189,248,0.03)",
+                    borderRadius: 8,
+                    border: "1px solid rgba(56,189,248,0.08)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: 3,
+                        height: listening ? `${Math.random() * 80 + 20}%` : "15%",
+                        borderRadius: 2,
+                        background: listening ? `rgba(244,114,182,${0.4 + Math.random() * 0.6})` : "rgba(56,189,248,0.2)",
+                        animation: listening ? `waveBar ${0.5 + Math.random() * 0.7}s ease-in-out infinite` : "none",
+                        animationDelay: `${i * 0.05}s`,
+                        transition: "height 0.3s ease",
+                      }}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={toggleListening}
+                  style={{
+                    width: "100%",
+                    marginTop: 8,
+                    padding: "7px",
+                    borderRadius: 8,
+                    background: listening ? "rgba(244,114,182,0.15)" : "rgba(56,189,248,0.08)",
+                    border: `1px solid ${listening ? "rgba(244,114,182,0.3)" : "rgba(56,189,248,0.15)"}`,
+                    color: listening ? "#f472b6" : "#38bdf8",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "'Sora', sans-serif",
+                    letterSpacing: "0.04em",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {listening ? "🔴 Listening..." : "🎙 Activate Voice"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* CHAT AREA */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+            {/* Mode indicator banner */}
+            <div
+              style={{
+                padding: "8px 24px",
+                borderBottom: "1px solid rgba(255,255,255,0.04)",
+                background: `linear-gradient(90deg, ${currentColor}08, transparent)`,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: currentColor, animation: "pulse 2s ease-in-out infinite" }} />
+              <span style={{ fontSize: 11, color: currentColor, letterSpacing: "0.1em", fontWeight: 500 }}>
+                {mode.toUpperCase()} MODE ACTIVE
+              </span>
+              <span style={{ fontSize: 11, color: "#334155", marginLeft: "auto" }}>
+                {messages.filter(m => m.role === "user").length} interactions
+              </span>
+            </div>
+
+            {/* Messages */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "24px",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} msg={msg} />
+              ))}
+              {loading && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 20, animation: "fadeSlideIn 0.3s ease-out" }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: "50%",
+                      background: "linear-gradient(135deg, #0ea5e9, #38bdf8)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      flexShrink: 0,
+                    }}
+                  >
+                    F
+                  </div>
+                  <div
+                    style={{
+                      background: "rgba(15,23,42,0.6)",
+                      border: "1px solid rgba(56,189,248,0.15)",
+                      borderRadius: "4px 18px 18px 18px",
+                      backdropFilter: "blur(8px)",
+                    }}
+                  >
+                    <TypingIndicator />
+                  </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {/* INPUT AREA */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderTop: "1px solid rgba(56,189,248,0.08)",
+                background: "rgba(2,8,23,0.7)",
+                backdropFilter: "blur(20px)",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-end",
+                  background: "rgba(15,23,42,0.8)",
+                  border: `1px solid ${input ? "rgba(56,189,248,0.3)" : "rgba(56,189,248,0.1)"}`,
+                  borderRadius: 14,
+                  padding: "10px 14px",
+                  backdropFilter: "blur(10px)",
+                  transition: "border-color 0.2s",
+                  boxShadow: input ? "0 0 20px rgba(56,189,248,0.08)" : "none",
+                }}
+              >
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder={`Message Fuad in ${mode} mode...`}
+                  rows={1}
+                  style={{
+                    flex: 1,
+                    color: "#e2e8f0",
+                    fontSize: 14,
+                    fontFamily: "'Sora', sans-serif",
+                    lineHeight: 1.6,
+                    maxHeight: 120,
+                    overflowY: "auto",
+                    letterSpacing: "0.01em",
+                  }}
+                  onInput={(e) => {
+                    e.target.style.height = "auto";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                  }}
+                />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <button
+                    onClick={toggleListening}
+                    className="action-btn"
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 9,
+                      background: listening ? "rgba(244,114,182,0.15)" : "rgba(255,255,255,0.04)",
+                      border: `1px solid ${listening ? "rgba(244,114,182,0.3)" : "rgba(255,255,255,0.07)"}`,
+                      cursor: "pointer",
+                      fontSize: 15,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "all 0.2s",
+                      flexShrink: 0,
+                    }}
+                  >
+                    🎙
+                  </button>
+                  <button
+                    className="send-btn"
+                    onClick={() => sendMessage(input)}
+                    disabled={!input.trim() || loading}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 9,
+                      background: input.trim() && !loading
+                        ? "linear-gradient(135deg, #0ea5e9, #6366f1)"
+                        : "rgba(255,255,255,0.04)",
+                      border: "none",
+                      cursor: input.trim() && !loading ? "pointer" : "not-allowed",
+                      color: input.trim() && !loading ? "#fff" : "#334155",
+                      fontSize: 15,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "all 0.2s",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ↑
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+                <span style={{ fontSize: 10, color: "#1e293b", letterSpacing: "0.08em" }}>
+                  FUAD v2.0 · {mode} Mode · Enter to send · Shift+Enter for new line
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
